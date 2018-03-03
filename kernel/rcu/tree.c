@@ -1043,11 +1043,32 @@ static int rcu_implicit_dynticks_qs(struct rcu_data *rdp)
 		return 1;
 	}
 
+<<<<<<< HEAD
 	/* If waiting too long on an offline CPU, complain. */
 	if (!(rdp->grpmask & rcu_rnp_online_cpus(rnp)) &&
 	    time_after(jiffies, rcu_state.gp_start + HZ)) {
 		bool onl;
 		struct rcu_node *rnp1;
+=======
+	/*
+	 * Has this CPU encountered a cond_resched() since the beginning
+	 * of the grace period?  For this to be the case, the CPU has to
+	 * have noticed the current grace period.  This might not be the
+	 * case for nohz_full CPUs looping in the kernel.
+	 */
+	jtsq = jiffies_till_sched_qs;
+	ruqp = per_cpu_ptr(&rcu_dynticks.rcu_urgent_qs, rdp->cpu);
+	if (time_after(jiffies, rdp->rsp->gp_start + jtsq) &&
+	    READ_ONCE(rdp->rcu_qs_ctr_snap) != per_cpu(rcu_dynticks.rcu_qs_ctr, rdp->cpu) &&
+	    READ_ONCE(rdp->gpnum) == rnp->gpnum && !rdp->gpwrap) {
+		trace_rcu_fqs(rdp->rsp->name, rdp->gpnum, rdp->cpu, TPS("rqc"));
+		rcu_gpnum_ovf(rnp, rdp);
+		return 1;
+	} else if (time_after(jiffies, rdp->rsp->gp_start + jtsq)) {
+		/* Load rcu_qs_ctr before store to rcu_urgent_qs. */
+		smp_store_release(ruqp, true);
+	}
+>>>>>>> e457ad226152... rcu: Rename cond_resched_rcu_qs() to cond_resched_tasks_rcu_qs()
 
 		WARN_ON(1);  /* Offline CPUs are supposed to report QS! */
 		pr_info("%s: grp: %d-%d level: %d ->gp_seq %ld ->completedqs %ld\n",
@@ -1855,6 +1876,7 @@ static bool rcu_gp_init(void)
 		trace_rcu_grace_period_init(rcu_state.name, rnp->gp_seq,
 					    rnp->level, rnp->grplo,
 					    rnp->grphi, rnp->qsmask);
+<<<<<<< HEAD
 		/* Quiescent states for tasks on any now-offline CPUs. */
 		mask = rnp->qsmask & ~rnp->qsmaskinitnext;
 		rnp->rcu_gp_init_mask = mask;
@@ -1864,6 +1886,11 @@ static bool rcu_gp_init(void)
 			raw_spin_unlock_irq_rcu_node(rnp);
 		cond_resched_tasks_rcu_qs();
 		WRITE_ONCE(rcu_state.gp_activity, jiffies);
+=======
+		raw_spin_unlock_irq_rcu_node(rnp);
+		cond_resched_tasks_rcu_qs();
+		WRITE_ONCE(rsp->gp_activity, jiffies);
+>>>>>>> e457ad226152... rcu: Rename cond_resched_rcu_qs() to cond_resched_tasks_rcu_qs()
 	}
 
 	return true;
@@ -2033,8 +2060,13 @@ static void rcu_gp_cleanup(void)
 		raw_spin_unlock_irq_rcu_node(rnp);
 		rcu_nocb_gp_cleanup(sq);
 		cond_resched_tasks_rcu_qs();
+<<<<<<< HEAD
 		WRITE_ONCE(rcu_state.gp_activity, jiffies);
 		rcu_gp_slow(gp_cleanup_delay);
+=======
+		WRITE_ONCE(rsp->gp_activity, jiffies);
+		rcu_gp_slow(rsp, gp_cleanup_delay);
+>>>>>>> e457ad226152... rcu: Rename cond_resched_rcu_qs() to cond_resched_tasks_rcu_qs()
 	}
 	rnp = rcu_get_root();
 	raw_spin_lock_irq_rcu_node(rnp); /* GP before ->gp_seq update. */
@@ -2086,7 +2118,11 @@ static int __noreturn rcu_gp_kthread(void *unused)
 			if (rcu_gp_init())
 				break;
 			cond_resched_tasks_rcu_qs();
+<<<<<<< HEAD
 			WRITE_ONCE(rcu_state.gp_activity, jiffies);
+=======
+			WRITE_ONCE(rsp->gp_activity, jiffies);
+>>>>>>> e457ad226152... rcu: Rename cond_resched_rcu_qs() to cond_resched_tasks_rcu_qs()
 			WARN_ON(signal_pending(current));
 			trace_rcu_grace_period(rcu_state.name,
 					       READ_ONCE(rcu_state.gp_seq),
@@ -2094,7 +2130,73 @@ static int __noreturn rcu_gp_kthread(void *unused)
 		}
 
 		/* Handle quiescent-state forcing. */
+<<<<<<< HEAD
 		rcu_gp_fqs_loop();
+=======
+		first_gp_fqs = true;
+		j = jiffies_till_first_fqs;
+		if (j > HZ) {
+			j = HZ;
+			jiffies_till_first_fqs = HZ;
+		}
+		ret = 0;
+		for (;;) {
+			if (!ret) {
+				rsp->jiffies_force_qs = jiffies + j;
+				WRITE_ONCE(rsp->jiffies_kick_kthreads,
+					   jiffies + 3 * j);
+			}
+			trace_rcu_grace_period(rsp->name,
+					       READ_ONCE(rsp->gpnum),
+					       TPS("fqswait"));
+			rsp->gp_state = RCU_GP_WAIT_FQS;
+			ret = swait_event_idle_timeout(rsp->gp_wq,
+					rcu_gp_fqs_check_wake(rsp, &gf), j);
+			rsp->gp_state = RCU_GP_DOING_FQS;
+			/* Locking provides needed memory barriers. */
+			/* If grace period done, leave loop. */
+			if (!READ_ONCE(rnp->qsmask) &&
+			    !rcu_preempt_blocked_readers_cgp(rnp))
+				break;
+			/* If time for quiescent-state forcing, do it. */
+			if (ULONG_CMP_GE(jiffies, rsp->jiffies_force_qs) ||
+			    (gf & RCU_GP_FLAG_FQS)) {
+				trace_rcu_grace_period(rsp->name,
+						       READ_ONCE(rsp->gpnum),
+						       TPS("fqsstart"));
+				rcu_gp_fqs(rsp, first_gp_fqs);
+				first_gp_fqs = false;
+				trace_rcu_grace_period(rsp->name,
+						       READ_ONCE(rsp->gpnum),
+						       TPS("fqsend"));
+				cond_resched_tasks_rcu_qs();
+				WRITE_ONCE(rsp->gp_activity, jiffies);
+				ret = 0; /* Force full wait till next FQS. */
+				j = jiffies_till_next_fqs;
+				if (j > HZ) {
+					j = HZ;
+					jiffies_till_next_fqs = HZ;
+				} else if (j < 1) {
+					j = 1;
+					jiffies_till_next_fqs = 1;
+				}
+			} else {
+				/* Deal with stray signal. */
+				cond_resched_tasks_rcu_qs();
+				WRITE_ONCE(rsp->gp_activity, jiffies);
+				WARN_ON(signal_pending(current));
+				trace_rcu_grace_period(rsp->name,
+						       READ_ONCE(rsp->gpnum),
+						       TPS("fqswaitsig"));
+				ret = 1; /* Keep old FQS timing. */
+				j = jiffies;
+				if (time_after(jiffies, rsp->jiffies_force_qs))
+					j = 1;
+				else
+					j = rsp->jiffies_force_qs - j;
+			}
+		}
+>>>>>>> e457ad226152... rcu: Rename cond_resched_rcu_qs() to cond_resched_tasks_rcu_qs()
 
 		/* Handle grace-period end. */
 		rcu_state.gp_state = RCU_GP_CLEANUP;
@@ -2530,7 +2632,11 @@ static void force_qs_rnp(int (*f)(struct rcu_data *rdp))
 	unsigned long mask;
 	struct rcu_node *rnp;
 
+<<<<<<< HEAD
 	rcu_for_each_leaf_node(rnp) {
+=======
+	rcu_for_each_leaf_node(rsp, rnp) {
+>>>>>>> e457ad226152... rcu: Rename cond_resched_rcu_qs() to cond_resched_tasks_rcu_qs()
 		cond_resched_tasks_rcu_qs();
 		mask = 0;
 		raw_spin_lock_irqsave_rcu_node(rnp, flags);

@@ -1754,6 +1754,53 @@ static void rcu_idle_count_callbacks_posted(void)
 	__this_cpu_add(rcu_data.nonlazy_posted, 1);
 }
 
+<<<<<<< HEAD
+=======
+/*
+ * If low on memory, ensure that each CPU has a non-lazy callback.
+ * This will wake up CPUs that have only lazy callbacks, in turn
+ * ensuring that they free up the corresponding memory in a timely manner.
+ * Because an uncertain amount of memory will be freed in some uncertain
+ * timeframe, we do not claim to have freed anything.
+ */
+static int rcu_oom_notify(struct notifier_block *self,
+			  unsigned long notused, void *nfreed)
+{
+	int cpu;
+
+	/* Wait for callbacks from earlier instance to complete. */
+	wait_event(oom_callback_wq, atomic_read(&oom_callback_count) == 0);
+	smp_mb(); /* Ensure callback reuse happens after callback invocation. */
+
+	/*
+	 * Prevent premature wakeup: ensure that all increments happen
+	 * before there is a chance of the counter reaching zero.
+	 */
+	atomic_set(&oom_callback_count, 1);
+
+	for_each_online_cpu(cpu) {
+		smp_call_function_single(cpu, rcu_oom_notify_cpu, NULL, 1);
+		cond_resched_tasks_rcu_qs();
+	}
+
+	/* Unconditionally decrement: no need to wake ourselves up. */
+	atomic_dec(&oom_callback_count);
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block rcu_oom_nb = {
+	.notifier_call = rcu_oom_notify
+};
+
+static int __init rcu_register_oom_notifier(void)
+{
+	register_oom_notifier(&rcu_oom_nb);
+	return 0;
+}
+early_initcall(rcu_register_oom_notifier);
+
+>>>>>>> e457ad226152... rcu: Rename cond_resched_rcu_qs() to cond_resched_tasks_rcu_qs()
 #endif /* #else #if !defined(CONFIG_RCU_FAST_NO_HZ) */
 
 #ifdef CONFIG_RCU_FAST_NO_HZ
