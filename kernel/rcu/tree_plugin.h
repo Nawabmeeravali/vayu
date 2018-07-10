@@ -966,22 +966,25 @@ void rcu_all_qs(void)
 {
 	unsigned long flags;
 
-	if (!raw_cpu_read(rcu_data.rcu_urgent_qs))
+	if (!raw_cpu_read(rcu_dynticks.rcu_urgent_qs))
 		return;
 	preempt_disable();
 	/* Load rcu_urgent_qs before other flags. */
-	if (!smp_load_acquire(this_cpu_ptr(&rcu_data.rcu_urgent_qs))) {
+	if (!smp_load_acquire(this_cpu_ptr(&rcu_dynticks.rcu_urgent_qs))) {
 		preempt_enable();
 		return;
 	}
-	this_cpu_write(rcu_data.rcu_urgent_qs, false);
+	this_cpu_write(rcu_dynticks.rcu_urgent_qs, false);
 	barrier(); /* Avoid RCU read-side critical sections leaking down. */
-	if (unlikely(raw_cpu_read(rcu_data.rcu_need_heavy_qs))) {
+	if (unlikely(raw_cpu_read(rcu_dynticks.rcu_need_heavy_qs))) {
 		local_irq_save(flags);
 		rcu_momentary_dyntick_idle();
 		local_irq_restore(flags);
 	}
-	rcu_qs();
+
+	if (unlikely(raw_cpu_read(rcu_data.cpu_no_qs.b.exp)))
+		rcu_qs();
+	this_cpu_inc(rcu_dynticks.rcu_qs_ctr);
 	barrier(); /* Avoid RCU read-side critical sections leaking up. */
 	preempt_enable();
 }
