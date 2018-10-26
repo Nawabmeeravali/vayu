@@ -1012,6 +1012,46 @@ out:
 }
 
 /*
+ * For blk-mq devices, we default to using mq-deadline, if available, for single
+ * queue devices.  If deadline isn't available OR we have multiple queues,
+ * default to "none".
+ */
+int elevator_init_mq(struct request_queue *q)
+{
+	struct elevator_type *e;
+	int err = 0;
+
+	if (q->nr_hw_queues != 1)
+		return 0;
+
+	/*
+	 * q->sysfs_lock must be held to provide mutual exclusion between
+	 * elevator_switch() and here.
+	 */
+	mutex_lock(&q->sysfs_lock);
+	if (unlikely(q->elevator))
+		goto out_unlock;
+
+#if defined(CONFIG_ZEN_INTERACTIVE) && defined(CONFIG_MQ_IOSCHED_BFQ)
+	e = elevator_get(q, "bfq-mq", false);
+#elif defined(CONFIG_ZEN_INTERACTIVE) && defined(CONFIG_IOSCHED_BFQ)
+	e = elevator_get(q, "bfq", false);
+#else
+	e = elevator_get(q, "mq-deadline", false);
+#endif
+	if (!e)
+		goto out_unlock;
+
+	err = blk_mq_init_sched(q, e);
+	if (err)
+		elevator_put(e);
+out_unlock:
+	mutex_unlock(&q->sysfs_lock);
+	return err;
+}
+
+
+/*
  * switch to new_e io scheduler. be careful not to introduce deadlocks -
  * we don't free the old io scheduler, before we have allocated what we
  * need for the new one. this way we have a chance of going back to the old
