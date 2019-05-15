@@ -96,7 +96,6 @@ TRACE_EVENT(rcu_grace_period,
  * "Startedleafroot": All nodes from leaf to root marked for future GP.
  * "Startedroot": Requested a nocb grace period based on root-node data.
  * "StartWait": Start waiting for the requested grace period.
- * "ResumeWait": Resume waiting after signal.
  * "EndWait": Complete wait.
  * "Cleanup": Clean up rcu_node structure after previous GP.
  * "CleanupMore": Clean up, and another no-CB GP is needed.
