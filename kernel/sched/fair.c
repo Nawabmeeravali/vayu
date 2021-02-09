@@ -7445,7 +7445,7 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 	int prev_cpu = task_cpu(p);
 	bool next_group_higher_cap = false;
 	int isolated_candidate = -1;
-
+	int mid_cap_orig_cpu = cpu_rq(smp_processor_id())->rd->mid_cap_orig_cpu;
 	*backup_cpu = -1;
 
 	/*
@@ -7840,7 +7840,6 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 
 		return best_idle_cpu;
 	}
-
 	if (target_cpu == -1)
 		target_cpu = prefer_idle
 			? best_active_cpu
