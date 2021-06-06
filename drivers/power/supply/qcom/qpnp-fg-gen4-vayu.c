@@ -779,6 +779,7 @@ static int fg_gen4_get_battery_temp(struct fg_dev *fg, int *val)
 	 * 10 bits representing temperature from -128 to 127 and each LSB is
 	 * 0.25 C. Multiply by 10 to convert it to deci degrees C.
 	 */
+	pr_info("nawab : val %d\n",sign_extend32(buf, 9) * 100 / 40);
 	*val = sign_extend32(buf, 9) * 100 / 40;
 
 	return 0;
@@ -798,6 +799,7 @@ static int fg_gen4_tz_get_temp(void *data, int *temperature)
 
 	/* Convert deciDegC to milliDegC */
 	*temperature = temp * 100;
+	pr_info("nawab : temperature %d\n",temp * 100);
 	return rc;
 }
 
