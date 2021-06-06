@@ -649,7 +649,7 @@ static int cm_check_thermal_status(struct charger_manager *cm)
 		dev_err(cm->dev, "Failed to get battery temperature\n");
 		return 0;
 	}
-
+	pr_info("charger-manager: max = %d, min =%d \n",desc->temp_max,desc->temp_min);
 	upper_limit = desc->temp_max;
 	lower_limit = desc->temp_min;
 
