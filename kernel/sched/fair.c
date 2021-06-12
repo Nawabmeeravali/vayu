@@ -7448,9 +7448,6 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 
 	*backup_cpu = -1;
 
-	unsigned int target_nr_rtg_high_prio = UINT_MAX;
-	bool rtg_high_prio_task = task_rtg_high_prio(p);
-	struct task_struct *curr_tsk;
 	/*
 	 * In most cases, target_capacity tracks capacity_orig of the most
 	 * energy efficient CPU candidate, thus requiring to minimise
@@ -7842,14 +7839,6 @@ static inline int find_best_target(struct task_struct *p, int *backup_cpu,
 					     -1, best_idle_cpu, -1);
 
 		return best_idle_cpu;
-	}
-
-	if (target_cpu != -1 && !idle_cpu(target_cpu) &&
-			best_idle_cpu != -1) {
-		curr_tsk = READ_ONCE(cpu_rq(target_cpu)->curr);
-		if (curr_tsk && schedtune_task_boost_rcu_locked(curr_tsk)) {
-			target_cpu = best_idle_cpu;
-		}
 	}
 
 	if (target_cpu == -1)
