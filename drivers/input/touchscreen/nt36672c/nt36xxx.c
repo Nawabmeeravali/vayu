@@ -443,7 +443,7 @@ void nvt_sw_reset(void)
 	/* ---software reset cmds to SWRST_N8_ADDR--- */
 	nvt_write_addr(SWRST_N8_ADDR, 0x55);
 
-	msleep(10);
+	//msleep(10);
 }
 
 /*******************************************************
@@ -459,7 +459,7 @@ void nvt_sw_reset_idle(void)
 	/* ---MCU idle cmds to SWRST_N8_ADDR--- */
 	nvt_write_addr(SWRST_N8_ADDR, 0xAA);
 
-	msleep(15);
+	//msleep(15);
 }
 
 /*******************************************************
@@ -1634,7 +1634,7 @@ static int8_t nvt_ts_check_chip_ver_trim(void)
 			}
 		}
 
-		msleep(10);
+		//msleep(10);
 	}
 
 out:
