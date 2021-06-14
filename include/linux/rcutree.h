@@ -30,6 +30,7 @@
 #ifndef __LINUX_RCUTREE_H
 #define __LINUX_RCUTREE_H
 
+void rcu_softirq_qs(void);
 void rcu_note_context_switch(bool preempt);
 int rcu_needs_cpu(u64 basem, u64 *nextevt);
 void rcu_cpu_stall_reset(void);
@@ -44,36 +45,35 @@ static inline void rcu_virt_note_context_switch(int cpu)
 	rcu_note_context_switch(false);
 }
 
-void synchronize_rcu_bh(void);
-void synchronize_sched_expedited(void);
+static inline void synchronize_rcu_bh(void)
+{
+	synchronize_rcu();
+}
+
 void synchronize_rcu_expedited(void);
+
+static inline void synchronize_sched_expedited(void)
+{
+	synchronize_rcu_expedited();
+}
 
 void kfree_call_rcu(struct rcu_head *head, rcu_callback_t func);
 
 /**
  * synchronize_rcu_bh_expedited - Brute-force RCU-bh grace period
  *
- * Wait for an RCU-bh grace period to elapse, but use a "big hammer"
- * approach to force the grace period to end quickly.  This consumes
- * significant time on all CPUs and is unfriendly to real-time workloads,
- * so is thus not recommended for any sort of common-case code.  In fact,
- * if you are using synchronize_rcu_bh_expedited() in a loop, please
- * restructure your code to batch your updates, and then use a single
- * synchronize_rcu_bh() instead.
- *
- * Note that it is illegal to call this function while holding any lock
- * that is acquired by a CPU-hotplug notifier.  And yes, it is also illegal
- * to call this function from a CPU-hotplug notifier.  Failing to observe
- * these restriction will result in deadlock.
+ * This is a transitional API and will soon be removed, with all
+ * callers converted to synchronize_rcu_expedited().
  */
 static inline void synchronize_rcu_bh_expedited(void)
 {
-	synchronize_sched_expedited();
+	synchronize_rcu_expedited();
 }
 
 void rcu_barrier(void);
 void rcu_barrier_bh(void);
 void rcu_barrier_sched(void);
+bool rcu_eqs_special_set(int cpu);
 unsigned long get_state_synchronize_rcu(void);
 void cond_synchronize_rcu(unsigned long oldstate);
 unsigned long get_state_synchronize_sched(void);
@@ -85,7 +85,6 @@ void rcu_irq_enter(void);
 void rcu_irq_exit(void);
 void rcu_irq_enter_irqson(void);
 void rcu_irq_exit_irqson(void);
-bool rcu_irq_enter_disabled(void);
 
 void exit_rcu(void);
 
@@ -101,5 +100,6 @@ int rcutree_online_cpu(unsigned int cpu);
 int rcutree_offline_cpu(unsigned int cpu);
 int rcutree_dead_cpu(unsigned int cpu);
 int rcutree_dying_cpu(unsigned int cpu);
+void rcu_cpu_starting(unsigned int cpu);
 
 #endif /* __LINUX_RCUTREE_H */

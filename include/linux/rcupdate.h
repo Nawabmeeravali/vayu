@@ -49,23 +49,24 @@
 
 /* Exported common interfaces */
 
-#ifdef CONFIG_PREEMPT_RCU
-void call_rcu(struct rcu_head *head, rcu_callback_t func);
-#else /* #ifdef CONFIG_PREEMPT_RCU */
-#define	call_rcu	call_rcu_sched
-#endif /* #else #ifdef CONFIG_PREEMPT_RCU */
-
-void call_rcu_bh(struct rcu_head *head, rcu_callback_t func);
-void call_rcu_sched(struct rcu_head *head, rcu_callback_t func);
+#ifndef CONFIG_TINY_RCU
 void synchronize_sched(void);
+void call_rcu_sched(struct rcu_head *head, rcu_callback_t func);
+#endif
+
+void call_rcu(struct rcu_head *head, rcu_callback_t func);
 void rcu_barrier_tasks(void);
+void synchronize_rcu(void);
+
+static inline void call_rcu_bh(struct rcu_head *head, rcu_callback_t func)
+{
+	call_rcu(head, func);
+}
 
 #ifdef CONFIG_PREEMPT_RCU
 
 void __rcu_read_lock(void);
 void __rcu_read_unlock(void);
-void rcu_read_unlock_special(struct task_struct *t);
-void synchronize_rcu(void);
 
 /*
  * Defined as a macro as it is a very low level header included from
@@ -87,11 +88,6 @@ static inline void __rcu_read_unlock(void)
 	preempt_enable();
 }
 
-static inline void synchronize_rcu(void)
-{
-	synchronize_sched();
-}
-
 static inline int rcu_preempt_depth(void)
 {
 	return 0;
@@ -102,11 +98,8 @@ static inline int rcu_preempt_depth(void)
 /* Internal to kernel */
 void rcu_init(void);
 extern int rcu_scheduler_active __read_mostly;
-void rcu_sched_qs(void);
-void rcu_bh_qs(void);
 void rcu_check_callbacks(int user);
 void rcu_report_dead(unsigned int cpu);
-void rcu_cpu_starting(unsigned int cpu);
 void rcutree_migrate_callbacks(int cpu);
 
 #ifdef CONFIG_RCU_STALL_COMMON
@@ -158,11 +151,11 @@ static inline void rcu_init_nohz(void) { }
 	} while (0)
 
 /*
- * Note a voluntary context switch for RCU-tasks benefit.  This is a
- * macro rather than an inline function to avoid #include hell.
+ * Note a quasi-voluntary context switch for RCU-tasks's benefit.
+ * This is a macro rather than an inline function to avoid #include hell.
  */
 #ifdef CONFIG_TASKS_RCU
-#define rcu_note_voluntary_context_switch_lite(t) \
+#define rcu_tasks_qs(t) \
 	do { \
 		if (READ_ONCE((t)->rcu_tasks_holdout)) \
 			WRITE_ONCE((t)->rcu_tasks_holdout, false); \
@@ -170,14 +163,14 @@ static inline void rcu_init_nohz(void) { }
 #define rcu_note_voluntary_context_switch(t) \
 	do { \
 		rcu_all_qs(); \
-		rcu_note_voluntary_context_switch_lite(t); \
+		rcu_tasks_qs(t); \
 	} while (0)
 void call_rcu_tasks(struct rcu_head *head, rcu_callback_t func);
 void synchronize_rcu_tasks(void);
 void exit_tasks_rcu_start(void);
 void exit_tasks_rcu_finish(void);
 #else /* #ifdef CONFIG_TASKS_RCU */
-#define rcu_note_voluntary_context_switch_lite(t)	do { } while (0)
+#define rcu_tasks_qs(t)	do { } while (0)
 #define rcu_note_voluntary_context_switch(t)		rcu_all_qs()
 #define call_rcu_tasks call_rcu_sched
 #define synchronize_rcu_tasks synchronize_sched
@@ -186,16 +179,16 @@ static inline void exit_tasks_rcu_finish(void) { }
 #endif /* #else #ifdef CONFIG_TASKS_RCU */
 
 /**
- * cond_resched_rcu_qs - Report potential quiescent states to RCU
+ * cond_resched_tasks_rcu_qs - Report potential quiescent states to RCU
  *
  * This macro resembles cond_resched(), except that it is defined to
  * report potential quiescent states to RCU-tasks even if the cond_resched()
  * machinery were to be shut off, as some advocate for PREEMPT kernels.
  */
-#define cond_resched_rcu_qs() \
+#define cond_resched_tasks_rcu_qs() \
 do { \
-	if (!cond_resched()) \
-		rcu_note_voluntary_context_switch(current); \
+	rcu_tasks_qs(current); \
+	cond_resched(); \
 } while (0)
 
 /*
@@ -324,8 +317,7 @@ static inline void rcu_preempt_sleep_check(void) { }
  * and rcu_assign_pointer().  Some of these could be folded into their
  * callers, but they are left separate in order to ease introduction of
  * multiple flavors of pointers to match the multiple flavors of RCU
- * (e.g., __rcu_bh, * __rcu_sched, and __srcu), should this make sense in
- * the future.
+ * (e.g., __rcu_sched, and __srcu), should this make sense in the future.
  */
 
 #ifdef __CHECKER__
@@ -688,14 +680,10 @@ static inline void rcu_read_unlock(void)
 /**
  * rcu_read_lock_bh() - mark the beginning of an RCU-bh critical section
  *
- * This is equivalent of rcu_read_lock(), but to be used when updates
- * are being done using call_rcu_bh() or synchronize_rcu_bh(). Since
- * both call_rcu_bh() and synchronize_rcu_bh() consider completion of a
- * softirq handler to be a quiescent state, a process in RCU read-side
- * critical section must be protected by disabling softirqs. Read-side
- * critical sections in interrupt context can use just rcu_read_lock(),
- * though this should at least be commented to avoid confusing people
- * reading the code.
+ * This is equivalent of rcu_read_lock(), but also disables softirqs.
+ * Note that synchronize_rcu() and friends may be used for the update
+ * side, although synchronize_rcu_bh() is available as a wrapper in the
+ * short term.  Longer term, the _bh update-side API will be eliminated.
  *
  * Note that rcu_read_lock_bh() and the matching rcu_read_unlock_bh()
  * must occur in the same context, for example, it is illegal to invoke
