@@ -2126,71 +2126,6 @@ static void rcu_gp_fqs(struct rcu_state *rsp, bool first_time)
 }
 
 /*
- * Loop doing repeated quiescent-state forcing until the grace period ends.
- */
-static void rcu_gp_fqs_loop(void)
-{
-	bool first_gp_fqs;
-	int gf;
-	unsigned long j;
-	int ret;
-	struct rcu_node *rnp = rcu_get_root();
-
-	first_gp_fqs = true;
-	j = jiffies_till_first_fqs;
-	ret = 0;
-	for (;;) {
-		if (!ret) {
-			rcu_state.jiffies_force_qs = jiffies + j;
-			WRITE_ONCE(rcu_state.jiffies_kick_kthreads,
-				   jiffies + 3 * j);
-		}
-		trace_rcu_grace_period(rcu_state.name,
-				       READ_ONCE(rcu_state.gp_seq),
-				       TPS("fqswait"));
-		rcu_state.gp_state = RCU_GP_WAIT_FQS;
-		ret = swait_event_idle_timeout(
-				rcu_state.gp_wq, rcu_gp_fqs_check_wake(&gf), j);
-		rcu_state.gp_state = RCU_GP_DOING_FQS;
-		/* Locking provides needed memory barriers. */
-		/* If grace period done, leave loop. */
-		if (!READ_ONCE(rnp->qsmask) &&
-		    !rcu_preempt_blocked_readers_cgp(rnp))
-			break;
-		/* If time for quiescent-state forcing, do it. */
-		if (ULONG_CMP_GE(jiffies, rcu_state.jiffies_force_qs) ||
-		    (gf & RCU_GP_FLAG_FQS)) {
-			trace_rcu_grace_period(rcu_state.name,
-					       READ_ONCE(rcu_state.gp_seq),
-					       TPS("fqsstart"));
-			rcu_gp_fqs(first_gp_fqs);
-			first_gp_fqs = false;
-			trace_rcu_grace_period(rcu_state.name,
-					       READ_ONCE(rcu_state.gp_seq),
-					       TPS("fqsend"));
-			cond_resched_tasks_rcu_qs();
-			WRITE_ONCE(rcu_state.gp_activity, jiffies);
-			ret = 0; /* Force full wait till next FQS. */
-			j = jiffies_till_next_fqs;
-		} else {
-			/* Deal with stray signal. */
-			cond_resched_tasks_rcu_qs();
-			WRITE_ONCE(rcu_state.gp_activity, jiffies);
-			WARN_ON(signal_pending(current));
-			trace_rcu_grace_period(rcu_state.name,
-					       READ_ONCE(rcu_state.gp_seq),
-					       TPS("fqswaitsig"));
-			ret = 1; /* Keep old FQS timing. */
-			j = jiffies;
-			if (time_after(jiffies, rcu_state.jiffies_force_qs))
-				j = 1;
-			else
-				j = rcu_state.jiffies_force_qs - j;
-		}
-	}
-}
-
-/*
  * Clean up after the old grace period.
  */
 static void rcu_gp_cleanup(struct rcu_state *rsp)
@@ -2269,7 +2204,6 @@ static void rcu_gp_cleanup(struct rcu_state *rsp)
  */
 static int __noreturn rcu_gp_kthread(void *arg)
 {
-<<<<<<< HEAD
 	bool first_gp_fqs;
 	int gf;
 	unsigned long j;
@@ -2277,8 +2211,6 @@ static int __noreturn rcu_gp_kthread(void *arg)
 	struct rcu_state *rsp = arg;
 	struct rcu_node *rnp = rcu_get_root(rsp);
 
-=======
->>>>>>> f8a30cbc432b... rcu: Pull rcu_gp_kthread() FQS loop into separate function
 	rcu_bind_gp_kthread();
 	for (;;) {
 
@@ -2303,7 +2235,6 @@ static int __noreturn rcu_gp_kthread(void *arg)
 		}
 
 		/* Handle quiescent-state forcing. */
-<<<<<<< HEAD
 		first_gp_fqs = true;
 		j = jiffies_till_first_fqs;
 		if (j > HZ) {
@@ -2367,9 +2298,6 @@ static int __noreturn rcu_gp_kthread(void *arg)
 					j = rsp->jiffies_force_qs - j;
 			}
 		}
-=======
-		rcu_gp_fqs_loop();
->>>>>>> f8a30cbc432b... rcu: Pull rcu_gp_kthread() FQS loop into separate function
 
 		/* Handle grace-period end. */
 		rsp->gp_state = RCU_GP_CLEANUP;
