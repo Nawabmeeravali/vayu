@@ -373,8 +373,14 @@ static unsigned long srcu_get_delay(struct srcu_struct *ssp)
 	return SRCU_INTERVAL;
 }
 
-/* Helper for cleanup_srcu_struct() and cleanup_srcu_struct_quiesced(). */
-void _cleanup_srcu_struct(struct srcu_struct *ssp, bool quiesced)
+/**
+ * cleanup_srcu_struct - deconstruct a sleep-RCU structure
+ * @ssp: structure to clean up.
+ *
+ * Must invoke this after you are finished using a given srcu_struct that
+ * was initialized via init_srcu_struct(), else you leak memory.
+ */
+void cleanup_srcu_struct(struct srcu_struct *ssp)
 {
 	int cpu;
 
@@ -382,24 +388,14 @@ void _cleanup_srcu_struct(struct srcu_struct *ssp, bool quiesced)
 		return; /* Just leak it! */
 	if (WARN_ON(srcu_readers_active(ssp)))
 		return; /* Just leak it! */
-	if (quiesced) {
-		if (WARN_ON(delayed_work_pending(&ssp->work)))
-			return; /* Just leak it! */
-	} else {
-		flush_delayed_work(&ssp->work);
-	}
+	flush_delayed_work(&ssp->work);
 	for_each_possible_cpu(cpu) {
 		struct srcu_data *sdp = per_cpu_ptr(ssp->sda, cpu);
 
-		if (quiesced) {
-			if (WARN_ON(timer_pending(&sdp->delay_work)))
-				return; /* Just leak it! */
-			if (WARN_ON(work_pending(&sdp->work)))
-				return; /* Just leak it! */
-		} else {
-			del_timer_sync(&sdp->delay_work);
-			flush_work(&sdp->work);
-		}
+		del_timer_sync(&sdp->delay_work);
+		flush_work(&sdp->work);
+		if (WARN_ON(rcu_segcblist_n_cbs(&sdp->srcu_cblist)))
+			return; /* Forgot srcu_barrier(), so just leak it! */
 	}
 	if (WARN_ON(rcu_seq_state(READ_ONCE(ssp->srcu_gp_seq)) != SRCU_STATE_IDLE) ||
 	    WARN_ON(srcu_readers_active(ssp))) {
@@ -410,7 +406,7 @@ void _cleanup_srcu_struct(struct srcu_struct *ssp, bool quiesced)
 	free_percpu(ssp->sda);
 	ssp->sda = NULL;
 }
-EXPORT_SYMBOL_GPL(_cleanup_srcu_struct);
+EXPORT_SYMBOL_GPL(cleanup_srcu_struct);
 
 /*
  * Counts the new reader in the appropriate per-CPU element of the
@@ -547,7 +543,7 @@ static void srcu_gp_end(struct srcu_struct *ssp)
 	idx = rcu_seq_state(ssp->srcu_gp_seq);
 	WARN_ON_ONCE(idx != SRCU_STATE_SCAN2);
 	cbdelay = srcu_get_delay(ssp);
-	ssp->srcu_last_gp_end = ktime_get_mono_fast_ns();
+	WRITE_ONCE(ssp->srcu_last_gp_end, ktime_get_mono_fast_ns());
 	rcu_seq_end(&ssp->srcu_gp_seq);
 	gpseq = rcu_seq_current(&ssp->srcu_gp_seq);
 	if (ULONG_CMP_LT(ssp->srcu_gp_seq_needed_exp, gpseq))
@@ -779,6 +775,7 @@ static bool srcu_might_be_idle(struct srcu_struct *ssp)
 	unsigned long flags;
 	struct srcu_data *sdp;
 	unsigned long t;
+	unsigned long tlast;
 
 	/* If the local srcu_data structure has callbacks, not idle.  */
 	local_irq_save(flags);
@@ -797,9 +794,9 @@ static bool srcu_might_be_idle(struct srcu_struct *ssp)
 
 	/* First, see if enough time has passed since the last GP. */
 	t = ktime_get_mono_fast_ns();
+	tlast = READ_ONCE(ssp->srcu_last_gp_end);
 	if (exp_holdoff == 0 ||
-	    time_in_range_open(t, ssp->srcu_last_gp_end,
-			       ssp->srcu_last_gp_end + exp_holdoff))
+	    time_in_range_open(t, tlast, tlast + exp_holdoff))
 		return false; /* Too soon after last GP. */
 
 	/* Next, check for probable idleness. */
@@ -848,8 +845,8 @@ static void srcu_leak_callback(struct rcu_head *rhp)
  * srcu_read_lock(), and srcu_read_unlock() that are all passed the same
  * srcu_struct structure.
  */
-void __call_srcu(struct srcu_struct *ssp, struct rcu_head *rhp,
-		 rcu_callback_t func, bool do_norm)
+static void __call_srcu(struct srcu_struct *ssp, struct rcu_head *rhp,
+			rcu_callback_t func, bool do_norm)
 {
 	unsigned long flags;
 	int idx;
@@ -1296,8 +1293,9 @@ void srcu_torture_stats_print(struct srcu_struct *ssp, char *tt, char *tf)
 
 		c0 = l0 - u0;
 		c1 = l1 - u1;
-		pr_cont(" %d(%ld,%ld %1p)",
-			cpu, c0, c1, rcu_segcblist_head(&sdp->srcu_cblist));
+		pr_cont(" %d(%ld,%ld %c)",
+			cpu, c0, c1,
+			"C."[rcu_segcblist_empty(&sdp->srcu_cblist)]);
 		s0 += c0;
 		s1 += c1;
 	}

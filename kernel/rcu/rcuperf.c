@@ -83,20 +83,26 @@ MODULE_AUTHOR("Paul E. McKenney <paulmck@linux.vnet.ibm.com>");
  * Various other use cases may of course be specified.
  */
 
+#ifdef MODULE
+# define RCUPERF_SHUTDOWN 0
+#else
+# define RCUPERF_SHUTDOWN 1
+#endif
+
 torture_param(bool, gp_async, false, "Use asynchronous GP wait primitives");
 torture_param(int, gp_async_max, 1000, "Max # outstanding waits per reader");
 torture_param(bool, gp_exp, false, "Use expedited GP wait primitives");
 torture_param(int, holdoff, 10, "Holdoff time before test start (s)");
 torture_param(int, nreaders, -1, "Number of RCU reader threads");
 torture_param(int, nwriters, -1, "Number of RCU updater threads");
-torture_param(bool, shutdown, !IS_ENABLED(MODULE),
+torture_param(bool, shutdown, RCUPERF_SHUTDOWN,
 	      "Shutdown at end of performance tests.");
 torture_param(int, verbose, 1, "Enable verbose debugging printk()s");
 torture_param(int, writer_holdoff, 0, "Holdoff (us) between GPs, zero to disable");
 
 static char *perf_type = "rcu";
 module_param(perf_type, charp, 0444);
-MODULE_PARM_DESC(perf_type, "Type of RCU to performance-test (rcu, rcu_bh, ...)");
+MODULE_PARM_DESC(perf_type, "Type of RCU to performance-test (rcu, srcu, ...)");
 
 static int nrealreaders;
 static int nrealwriters;
@@ -381,6 +387,14 @@ rcu_perf_writer(void *arg)
 
 	if (holdoff)
 		schedule_timeout_uninterruptible(holdoff * HZ);
+
+	/*
+	 * Wait until rcu_end_inkernel_boot() is called for normal GP tests
+	 * so that RCU is not always expedited for normal GP tests.
+	 * The system_state test is approximate, but works well in practice.
+	 */
+	while (!gp_exp && system_state != SYSTEM_RUNNING)
+		schedule_timeout_uninterruptible(1);
 
 	t = ktime_get_mono_fast_ns();
 	if (atomic_inc_return(&n_rcu_perf_writer_started) >= nrealwriters) {
